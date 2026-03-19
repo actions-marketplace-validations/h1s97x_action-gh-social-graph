@@ -1,0 +1,2 @@
+node_modules/
+# dist/ 不要忽略，Action 运行时需要提交 dist/
