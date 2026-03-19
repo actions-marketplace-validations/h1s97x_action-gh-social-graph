@@ -1,0 +1,56 @@
+name: 'GitHub Social Graph'
+description: 'Analyze a GitHub user social network and post a report as a PR comment or Job Summary'
+author: 'H1S97X'
+
+branding:
+  icon: 'users'
+  color: 'blue'
+
+inputs:
+  github-token:
+    description: 'GitHub token for API calls and PR comments'
+    required: true
+    default: ${{ github.token }}
+
+  username:
+    description: 'GitHub username to analyze. Defaults to the PR author when triggered by pull_request event'
+    required: false
+    default: ''
+
+  max-followers:
+    description: 'Maximum number of followers to analyze'
+    required: false
+    default: '50'
+
+  max-repos:
+    description: 'Maximum number of repositories to analyze'
+    required: false
+    default: '15'
+
+  comment-on-pr:
+    description: 'Post the report as a PR comment (only works on pull_request events)'
+    required: false
+    default: 'true'
+
+outputs:
+  report:
+    description: 'Generated Markdown report'
+
+  total-nodes:
+    description: 'Total number of graph nodes'
+
+  total-links:
+    description: 'Total number of graph links'
+
+  user-nodes:
+    description: 'Number of developer nodes'
+
+  repo-nodes:
+    description: 'Number of repository nodes'
+
+  recommendations:
+    description: 'Recommended developers to follow (JSON array of logins)'
+
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
