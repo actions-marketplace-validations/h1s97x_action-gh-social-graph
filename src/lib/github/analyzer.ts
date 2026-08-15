@@ -1,3 +1,4 @@
+import * as core from '@actions/core';
 import { GitHubAPIService, createGitHubAPI } from './api';
 import {
   GitHubUser,
@@ -15,6 +16,9 @@ const NODE_COLORS = {
   follower: '#4299e1',
   repo: '#48bb78',
 };
+
+/** 并发池大小限制 */
+const CONCURRENCY_LIMIT = 5;
 
 export class SocialGraphAnalyzer {
   private api: GitHubAPIService;
@@ -43,7 +47,24 @@ export class SocialGraphAnalyzer {
     const recommendations = this.generateRecommendations(mainUser, following, repoData);
     const insights = this.generateInsights(repos, repoData);
 
-    return { graph, recommendations, insights };
+    // 收集限流信息用于日志/报告输出
+    const rateLimit = this.api.getRateLimit();
+
+    if (rateLimit && rateLimit.remaining !== undefined && rateLimit.limit > 0) {
+      const pct = Math.round((rateLimit.remaining / rateLimit.limit) * 100);
+      core.info(
+        `⏳ GitHub API rate limit: ${rateLimit.remaining}/${rateLimit.limit} remaining (${pct}%), ` +
+          `resets at ${rateLimit.reset.toISOString()}`
+      );
+      if (pct < 20) {
+        core.warning(
+          `⚠️ Low GitHub API rate limit remaining: ${rateLimit.remaining}/${rateLimit.limit} (${pct}%). ` +
+            `Consider using a Personal Access Token with higher quota.`
+        );
+      }
+    }
+
+    return { graph, recommendations, insights, rateLimit };
   }
 
   private findMutualFollowers(
@@ -63,26 +84,46 @@ export class SocialGraphAnalyzer {
       .sort((a, b) => b.stargazers_count - a.stargazers_count)
       .slice(0, maxRepos);
 
-    for (const repo of sorted) {
-      try {
-        const repoContributors = await this.api.getContributors(repo.owner.login, repo.name);
-        contributors.set(repo.full_name, repoContributors.slice(0, 20).map((c) => ({
-          login: c.login,
-          contributions: c.contributions,
-        })));
-
+    // 带并发限制的批处理：避免串行 for 循环 + 硬编码 setTimeout
+    let index = 0;
+    const workers = Array.from({ length: Math.min(CONCURRENCY_LIMIT, sorted.length) }, async () => {
+      while (index < sorted.length) {
+        const repo = sorted[index++];
         try {
-          const stargazerList = await this.api.getStargazers(repo.owner.login, repo.name, 1, 50);
-          stargazers.set(repo.full_name, stargazerList.map((s) => s.user.login));
-        } catch {
-          // stargazers 需要认证，忽略错误
-        }
+          const repoContributors = await this.api.getContributors(repo.owner.login, repo.name);
+          contributors.set(repo.full_name, repoContributors.slice(0, 20).map((c) => ({
+            login: c.login,
+            contributions: c.contributions,
+          })));
 
-        await new Promise((r) => setTimeout(r, 100));
-      } catch (err) {
-        console.error(`Error analyzing repo ${repo.full_name}:`, err);
+          try {
+            const stargazerList = await this.api.getStargazers(repo.owner.login, repo.name, 1, 50);
+            stargazers.set(repo.full_name, stargazerList.map((s) => s.user.login));
+          } catch (stargazerErr) {
+            // stargazers 需要认证，若失败输出告警而非静默忽略
+            if (stargazerErr instanceof Error) {
+              core.warning(
+                `⚠️ Failed to fetch stargazers for ${repo.full_name}: ${stargazerErr.message}. ` +
+                  `Stargazers require authentication. Verify the github-token is valid and has sufficient scope.`
+              );
+            } else {
+              core.warning(
+                `⚠️ Failed to fetch stargazers for ${repo.full_name}. Stargazers require authentication.`
+              );
+            }
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (err instanceof Error && 'status' in err && (err as unknown as { status?: number }).status === 404) {
+            console.error(`Repo ${repo.full_name} not found or no contributors:`, msg);
+          } else {
+            console.error(`Error analyzing repo ${repo.full_name}:`, msg);
+          }
+        }
       }
-    }
+    });
+
+    await Promise.all(workers);
 
     return { contributors, stargazers };
   }

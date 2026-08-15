@@ -30032,13 +30032,47 @@ run();
 /***/ }),
 
 /***/ 3161:
-/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
 "use strict";
 
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.SocialGraphAnalyzer = void 0;
 exports.createSocialGraphAnalyzer = createSocialGraphAnalyzer;
+const core = __importStar(__nccwpck_require__(7484));
 const api_1 = __nccwpck_require__(6375);
 const NODE_COLORS = {
     mainUser: '#00d4ff',
@@ -30046,6 +30080,8 @@ const NODE_COLORS = {
     follower: '#4299e1',
     repo: '#48bb78',
 };
+/** 并发池大小限制 */
+const CONCURRENCY_LIMIT = 5;
 class SocialGraphAnalyzer {
     constructor(api) {
         this.api = api ?? (0, api_1.createGitHubAPI)();
@@ -30063,7 +30099,18 @@ class SocialGraphAnalyzer {
         const graph = this.buildGraph(mainUser, followers, following, mutualFollowers, repos, repoData);
         const recommendations = this.generateRecommendations(mainUser, following, repoData);
         const insights = this.generateInsights(repos, repoData);
-        return { graph, recommendations, insights };
+        // 收集限流信息用于日志/报告输出
+        const rateLimit = this.api.getRateLimit();
+        if (rateLimit && rateLimit.remaining !== undefined && rateLimit.limit > 0) {
+            const pct = Math.round((rateLimit.remaining / rateLimit.limit) * 100);
+            core.info(`⏳ GitHub API rate limit: ${rateLimit.remaining}/${rateLimit.limit} remaining (${pct}%), ` +
+                `resets at ${rateLimit.reset.toISOString()}`);
+            if (pct < 20) {
+                core.warning(`⚠️ Low GitHub API rate limit remaining: ${rateLimit.remaining}/${rateLimit.limit} (${pct}%). ` +
+                    `Consider using a Personal Access Token with higher quota.`);
+            }
+        }
+        return { graph, recommendations, insights, rateLimit };
     }
     findMutualFollowers(followers, following) {
         const followerSet = new Set(followers.map((f) => f.login));
@@ -30076,26 +30123,44 @@ class SocialGraphAnalyzer {
             .filter((r) => !r.fork && r.stargazers_count > 0)
             .sort((a, b) => b.stargazers_count - a.stargazers_count)
             .slice(0, maxRepos);
-        for (const repo of sorted) {
-            try {
-                const repoContributors = await this.api.getContributors(repo.owner.login, repo.name);
-                contributors.set(repo.full_name, repoContributors.slice(0, 20).map((c) => ({
-                    login: c.login,
-                    contributions: c.contributions,
-                })));
+        // 带并发限制的批处理：避免串行 for 循环 + 硬编码 setTimeout
+        let index = 0;
+        const workers = Array.from({ length: Math.min(CONCURRENCY_LIMIT, sorted.length) }, async () => {
+            while (index < sorted.length) {
+                const repo = sorted[index++];
                 try {
-                    const stargazerList = await this.api.getStargazers(repo.owner.login, repo.name, 1, 50);
-                    stargazers.set(repo.full_name, stargazerList.map((s) => s.user.login));
+                    const repoContributors = await this.api.getContributors(repo.owner.login, repo.name);
+                    contributors.set(repo.full_name, repoContributors.slice(0, 20).map((c) => ({
+                        login: c.login,
+                        contributions: c.contributions,
+                    })));
+                    try {
+                        const stargazerList = await this.api.getStargazers(repo.owner.login, repo.name, 1, 50);
+                        stargazers.set(repo.full_name, stargazerList.map((s) => s.user.login));
+                    }
+                    catch (stargazerErr) {
+                        // stargazers 需要认证，若失败输出告警而非静默忽略
+                        if (stargazerErr instanceof Error) {
+                            core.warning(`⚠️ Failed to fetch stargazers for ${repo.full_name}: ${stargazerErr.message}. ` +
+                                `Stargazers require authentication. Verify the github-token is valid and has sufficient scope.`);
+                        }
+                        else {
+                            core.warning(`⚠️ Failed to fetch stargazers for ${repo.full_name}. Stargazers require authentication.`);
+                        }
+                    }
                 }
-                catch {
-                    // stargazers 需要认证，忽略错误
+                catch (err) {
+                    const msg = err instanceof Error ? err.message : String(err);
+                    if (err instanceof Error && 'status' in err && err.status === 404) {
+                        console.error(`Repo ${repo.full_name} not found or no contributors:`, msg);
+                    }
+                    else {
+                        console.error(`Error analyzing repo ${repo.full_name}:`, msg);
+                    }
                 }
-                await new Promise((r) => setTimeout(r, 100));
             }
-            catch (err) {
-                console.error(`Error analyzing repo ${repo.full_name}:`, err);
-            }
-        }
+        });
+        await Promise.all(workers);
         return { contributors, stargazers };
     }
     buildGraph(mainUser, followers, following, mutualFollowers, repos, repoData) {
@@ -30264,10 +30329,82 @@ class GitHubAPIError extends Error {
     }
 }
 exports.GitHubAPIError = GitHubAPIError;
+// 429 限流：始终可重试；5xx 服务器错误：可重试
+// 403 仅在确为限流（remaining === 0）时重试，避免认证/权限错误的无效重试
+const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
+const MAX_RETRIES = 5; // 最大重试次数（不含初始请求）
+const BASE_DELAY_MS = 1000;
+const MAX_DELAY_MS = 30000;
 class GitHubAPIService {
     constructor(token) {
         this.token = token;
         this.baseUrl = GITHUB_API_BASE;
+    }
+    /** 获取最近一次 API 调用的限流信息 */
+    getRateLimit() {
+        return this.lastRateLimit;
+    }
+    async fetchWithRetry(endpoint, headers) {
+        let attempt = 0;
+        while (true) {
+            attempt++;
+            const response = await fetch(`${this.baseUrl}${endpoint}`, { headers });
+            const rateLimit = this.parseRateLimit(response);
+            this.lastRateLimit = rateLimit;
+            // 读取响应体（可能为 JSON 或为空）
+            const body = await response
+                .json()
+                .catch(() => ({}));
+            if (response.ok) {
+                return body;
+            }
+            // 检查是否应重试。
+            // 403 特殊处理：仅当确为限流（X-RateLimit-Remaining === 0）时才重试，
+            // 否则（认证/权限不足等）重试无济于事，直接抛出。
+            const isRetryable = RETRYABLE_STATUS_CODES.has(response.status) ||
+                (response.status === 403 && rateLimit.remaining === 0);
+            const retryAfter = response.headers.get('Retry-After');
+            // attempt 从 1 开始计初始请求，故仅当已重试次数 < MAX_RETRIES 时继续
+            if (isRetryable && attempt <= MAX_RETRIES) {
+                const delayMs = this.computeBackoffMs(rateLimit, retryAfter, attempt);
+                // 等待时输出日志
+                console.warn(`[GitHub API] Rate limit / error ${response.status} on ${endpoint}, ` +
+                    `retrying in ${Math.ceil(delayMs / 1000)}s (attempt ${attempt}/${MAX_RETRIES})`);
+                await new Promise((resolve) => setTimeout(resolve, delayMs));
+                continue;
+            }
+            // 如果重试耗尽或不可重试，抛出错误
+            const errorMsg = body.message ||
+                (isRetryable && attempt > MAX_RETRIES
+                    ? `GitHub API rate limit exceeded on ${endpoint} after ${MAX_RETRIES} retries`
+                    : `GitHub API error: ${response.status}`);
+            throw new GitHubAPIError(errorMsg, response.status, rateLimit);
+        }
+    }
+    /** 计算下一次重试前的等待时长 */
+    computeBackoffMs(rateLimit, retryAfter, attempt) {
+        // 优先使用 Retry-After 头（秒数）。
+        // 若该头为 HTTP-date 或其他非数字格式，parseInt 会得到 NaN，
+        // 需校验有效性并回退到其他计算方式，避免 setTimeout(NaN) 引发的快速重试风暴。
+        if (retryAfter) {
+            const secs = parseInt(retryAfter, 10);
+            if (Number.isFinite(secs) && secs > 0) {
+                return secs * 1000;
+            }
+        }
+        // 其次用 X-RateLimit-Reset 计算距重置的时间
+        if (rateLimit.reset.getTime() > Date.now()) {
+            return Math.min(rateLimit.reset.getTime() - Date.now() + 1000, MAX_DELAY_MS);
+        }
+        // 兜底：指数退避，2s → 4s → 8s → 16s → 30s（封顶），保证重试序列能覆盖到上限
+        return Math.min(BASE_DELAY_MS * Math.pow(2, attempt), MAX_DELAY_MS);
+    }
+    parseRateLimit(response) {
+        return {
+            limit: parseInt(response.headers.get('X-RateLimit-Limit') || '0'),
+            remaining: parseInt(response.headers.get('X-RateLimit-Remaining') || '0'),
+            reset: new Date(parseInt(response.headers.get('X-RateLimit-Reset') || '0') * 1000),
+        };
     }
     async fetch(endpoint) {
         const headers = {
@@ -30277,17 +30414,7 @@ class GitHubAPIService {
         if (this.token) {
             headers['Authorization'] = `Bearer ${this.token}`;
         }
-        const response = await fetch(`${this.baseUrl}${endpoint}`, { headers });
-        const rateLimit = {
-            limit: parseInt(response.headers.get('X-RateLimit-Limit') || '0'),
-            remaining: parseInt(response.headers.get('X-RateLimit-Remaining') || '0'),
-            reset: new Date(parseInt(response.headers.get('X-RateLimit-Reset') || '0') * 1000),
-        };
-        if (!response.ok) {
-            const error = await response.json().catch(() => ({}));
-            throw new GitHubAPIError(error.message || `GitHub API error: ${response.status}`, response.status, rateLimit);
-        }
-        return response.json();
+        return this.fetchWithRetry(endpoint, headers);
     }
     async getUser(username) {
         return this.fetch(`/users/${username}`);
@@ -30412,6 +30539,13 @@ function generateMarkdownReport(username, result) {
     }
     lines.push('---');
     lines.push(`*Generated at / 分析时间: ${new Date().toISOString()}*`);
+    // API rate limit 信息
+    if (result.rateLimit && result.rateLimit.limit > 0) {
+        const { remaining, limit, reset } = result.rateLimit;
+        const pct = Math.round((remaining / limit) * 100);
+        lines.push('');
+        lines.push(`> ⏳ GitHub API rate limit: **${remaining}/${limit}** remaining (${pct}%), resets at ${reset.toISOString()}`);
+    }
     return lines.join('\n');
 }
 

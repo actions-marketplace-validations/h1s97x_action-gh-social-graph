@@ -75,5 +75,13 @@ export function generateMarkdownReport(username: string, result: AnalysisResult)
   lines.push('---');
   lines.push(`*Generated at / 分析时间: ${new Date().toISOString()}*`);
 
+  // API rate limit 信息
+  if (result.rateLimit && result.rateLimit.limit > 0) {
+    const { remaining, limit, reset } = result.rateLimit;
+    const pct = Math.round((remaining / limit) * 100);
+    lines.push('');
+    lines.push(`> ⏳ GitHub API rate limit: **${remaining}/${limit}** remaining (${pct}%), resets at ${reset.toISOString()}`);
+  }
+
   return lines.join('\n');
 }
