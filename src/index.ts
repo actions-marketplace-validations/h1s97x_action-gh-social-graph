@@ -23,7 +23,9 @@ async function run(): Promise<void> {
     }
 
     if (!targetUsername) {
-      core.setFailed('Could not determine the target username. Please specify it via the `username` input.');
+      core.setFailed(
+        'Could not determine the target username. Please specify it via the `username` input.'
+      );
       return;
     }
 
@@ -32,7 +34,9 @@ async function run(): Promise<void> {
     const analyzer = createSocialGraphAnalyzer(token);
     const result = await analyzer.analyzeUser(targetUsername, { maxFollowers, maxRepos });
 
-    core.info(`✅ Analysis complete: ${result.graph.stats.totalNodes} nodes, ${result.graph.stats.totalLinks} links`);
+    core.info(
+      `✅ Analysis complete: ${result.graph.stats.totalNodes} nodes, ${result.graph.stats.totalLinks} links`
+    );
 
     const report = generateMarkdownReport(targetUsername, result);
 
@@ -42,7 +46,10 @@ async function run(): Promise<void> {
     core.setOutput('total-links', String(result.graph.stats.totalLinks));
     core.setOutput('user-nodes', String(result.graph.stats.userNodes));
     core.setOutput('repo-nodes', String(result.graph.stats.repoNodes));
-    core.setOutput('recommendations', JSON.stringify(result.recommendations.map((r) => r.user.login)));
+    core.setOutput(
+      'recommendations',
+      JSON.stringify(result.recommendations.map((r) => r.user.login))
+    );
 
     // 写入 Job Summary
     await core.summary.addRaw(report).write();
@@ -65,10 +72,20 @@ async function run(): Promise<void> {
       );
 
       if (existing) {
-        await octokit.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body: report });
+        await octokit.rest.issues.updateComment({
+          owner,
+          repo,
+          comment_id: existing.id,
+          body: report,
+        });
         core.info('✅ PR comment updated');
       } else {
-        await octokit.rest.issues.createComment({ owner, repo, issue_number: prNumber, body: report });
+        await octokit.rest.issues.createComment({
+          owner,
+          repo,
+          issue_number: prNumber,
+          body: report,
+        });
         core.info('✅ PR comment created');
       }
     }

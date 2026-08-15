@@ -38,10 +38,27 @@
       script: |
         git remote remove gh-target 2>/dev/null || true
 
+# PR 门禁：typecheck + test + lint
+.pr-gate: &pr-gate
+  docker:
+    image: node:20
+  stages:
+    - name: install
+      script: npm ci
+    - name: typecheck
+      script: npm run typecheck
+    - name: test
+      script: npm run test
+    - name: lint
+      script: npm run lint
+
 main:
   push:
     - name: sync-to-github
       <<: *sync-github
+  pull_request:
+    - name: pr-gate
+      <<: *pr-gate
 
 $:
   web_trigger:

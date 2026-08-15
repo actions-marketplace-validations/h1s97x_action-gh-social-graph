@@ -30013,11 +30013,21 @@ async function run() {
             });
             const existing = comments.find((c) => c.user?.type === 'Bot' && c.body?.includes('GitHub Social Graph'));
             if (existing) {
-                await octokit.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body: report });
+                await octokit.rest.issues.updateComment({
+                    owner,
+                    repo,
+                    comment_id: existing.id,
+                    body: report,
+                });
                 core.info('✅ PR comment updated');
             }
             else {
-                await octokit.rest.issues.createComment({ owner, repo, issue_number: prNumber, body: report });
+                await octokit.rest.issues.createComment({
+                    owner,
+                    repo,
+                    issue_number: prNumber,
+                    body: report,
+                });
                 core.info('✅ PR comment created');
             }
         }
@@ -30151,7 +30161,9 @@ class SocialGraphAnalyzer {
                 }
                 catch (err) {
                     const msg = err instanceof Error ? err.message : String(err);
-                    if (err instanceof Error && 'status' in err && err.status === 404) {
+                    if (err instanceof Error &&
+                        'status' in err &&
+                        err.status === 404) {
                         console.error(`Repo ${repo.full_name} not found or no contributors:`, msg);
                     }
                     else {
@@ -30185,7 +30197,11 @@ class SocialGraphAnalyzer {
                     label: follower.login,
                     type: 'user',
                     avatar: follower.avatar_url,
-                    data: { login: follower.login, avatar_url: follower.avatar_url, html_url: follower.html_url },
+                    data: {
+                        login: follower.login,
+                        avatar_url: follower.avatar_url,
+                        html_url: follower.html_url,
+                    },
                     connections: 1,
                     color: mutualFollowers.has(follower.login) ? '#f687b3' : NODE_COLORS.follower,
                 });
@@ -30201,7 +30217,11 @@ class SocialGraphAnalyzer {
                     label: followee.login,
                     type: 'user',
                     avatar: followee.avatar_url,
-                    data: { login: followee.login, avatar_url: followee.avatar_url, html_url: followee.html_url },
+                    data: {
+                        login: followee.login,
+                        avatar_url: followee.avatar_url,
+                        html_url: followee.html_url,
+                    },
                     connections: 1,
                     color: mutualFollowers.has(followee.login) ? '#f687b3' : NODE_COLORS.collaborator,
                 });
@@ -30221,7 +30241,12 @@ class SocialGraphAnalyzer {
             };
             nodes.push(repoNode);
             nodeMap.set(repoNodeId, repoNode);
-            links.push({ source: mainUser.login, target: repoNodeId, type: 'stars', weight: repo.stargazers_count / 100 || 1 });
+            links.push({
+                source: mainUser.login,
+                target: repoNodeId,
+                type: 'stars',
+                weight: repo.stargazers_count / 100 || 1,
+            });
             for (const contributor of (repoData.contributors.get(repo.full_name) ?? []).slice(0, 5)) {
                 if (contributor.login === mainUser.login)
                     continue;
@@ -30236,7 +30261,12 @@ class SocialGraphAnalyzer {
                     });
                     nodeMap.set(contributor.login, nodes[nodes.length - 1]);
                 }
-                links.push({ source: contributor.login, target: repoNodeId, type: 'collaborates', weight: contributor.contributions / 10 || 1 });
+                links.push({
+                    source: contributor.login,
+                    target: repoNodeId,
+                    type: 'collaborates',
+                    weight: contributor.contributions / 10 || 1,
+                });
             }
         }
         return {
@@ -30287,7 +30317,11 @@ class SocialGraphAnalyzer {
             .sort((a, b) => b[1] - a[1])
             .slice(0, 5)
             .map(([login, collaborations]) => ({
-            user: { login, avatar_url: `https://avatars.githubusercontent.com/${login}`, html_url: `https://github.com/${login}` },
+            user: {
+                login,
+                avatar_url: `https://avatars.githubusercontent.com/${login}`,
+                html_url: `https://github.com/${login}`,
+            },
             collaborations,
         }));
         const topStarredRepos = [...repos]
@@ -30352,9 +30386,7 @@ class GitHubAPIService {
             const rateLimit = this.parseRateLimit(response);
             this.lastRateLimit = rateLimit;
             // 读取响应体（可能为 JSON 或为空）
-            const body = await response
-                .json()
-                .catch(() => ({}));
+            const body = (await response.json().catch(() => ({})));
             if (response.ok) {
                 return body;
             }

@@ -91,14 +91,20 @@ export class SocialGraphAnalyzer {
         const repo = sorted[index++];
         try {
           const repoContributors = await this.api.getContributors(repo.owner.login, repo.name);
-          contributors.set(repo.full_name, repoContributors.slice(0, 20).map((c) => ({
-            login: c.login,
-            contributions: c.contributions,
-          })));
+          contributors.set(
+            repo.full_name,
+            repoContributors.slice(0, 20).map((c) => ({
+              login: c.login,
+              contributions: c.contributions,
+            }))
+          );
 
           try {
             const stargazerList = await this.api.getStargazers(repo.owner.login, repo.name, 1, 50);
-            stargazers.set(repo.full_name, stargazerList.map((s) => s.user.login));
+            stargazers.set(
+              repo.full_name,
+              stargazerList.map((s) => s.user.login)
+            );
           } catch (stargazerErr) {
             // stargazers 需要认证，若失败输出告警而非静默忽略
             if (stargazerErr instanceof Error) {
@@ -114,7 +120,11 @@ export class SocialGraphAnalyzer {
           }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
-          if (err instanceof Error && 'status' in err && (err as unknown as { status?: number }).status === 404) {
+          if (
+            err instanceof Error &&
+            'status' in err &&
+            (err as unknown as { status?: number }).status === 404
+          ) {
             console.error(`Repo ${repo.full_name} not found or no contributors:`, msg);
           } else {
             console.error(`Error analyzing repo ${repo.full_name}:`, msg);
@@ -134,7 +144,10 @@ export class SocialGraphAnalyzer {
     following: Array<{ login: string; avatar_url: string; html_url: string }>,
     mutualFollowers: Set<string>,
     repos: GitHubRepository[],
-    repoData: { contributors: Map<string, Array<{ login: string; contributions: number }>>; stargazers: Map<string, string[]> }
+    repoData: {
+      contributors: Map<string, Array<{ login: string; contributions: number }>>;
+      stargazers: Map<string, string[]>;
+    }
   ): SocialGraph {
     const nodes: GraphNode[] = [];
     const links: GraphLink[] = [];
@@ -159,7 +172,11 @@ export class SocialGraphAnalyzer {
           label: follower.login,
           type: 'user',
           avatar: follower.avatar_url,
-          data: { login: follower.login, avatar_url: follower.avatar_url, html_url: follower.html_url } as GitHubUser,
+          data: {
+            login: follower.login,
+            avatar_url: follower.avatar_url,
+            html_url: follower.html_url,
+          } as GitHubUser,
           connections: 1,
           color: mutualFollowers.has(follower.login) ? '#f687b3' : NODE_COLORS.follower,
         });
@@ -176,7 +193,11 @@ export class SocialGraphAnalyzer {
           label: followee.login,
           type: 'user',
           avatar: followee.avatar_url,
-          data: { login: followee.login, avatar_url: followee.avatar_url, html_url: followee.html_url } as GitHubUser,
+          data: {
+            login: followee.login,
+            avatar_url: followee.avatar_url,
+            html_url: followee.html_url,
+          } as GitHubUser,
           connections: 1,
           color: mutualFollowers.has(followee.login) ? '#f687b3' : NODE_COLORS.collaborator,
         });
@@ -197,7 +218,12 @@ export class SocialGraphAnalyzer {
       };
       nodes.push(repoNode);
       nodeMap.set(repoNodeId, repoNode);
-      links.push({ source: mainUser.login, target: repoNodeId, type: 'stars', weight: repo.stargazers_count / 100 || 1 });
+      links.push({
+        source: mainUser.login,
+        target: repoNodeId,
+        type: 'stars',
+        weight: repo.stargazers_count / 100 || 1,
+      });
 
       for (const contributor of (repoData.contributors.get(repo.full_name) ?? []).slice(0, 5)) {
         if (contributor.login === mainUser.login) continue;
@@ -212,7 +238,12 @@ export class SocialGraphAnalyzer {
           });
           nodeMap.set(contributor.login, nodes[nodes.length - 1]);
         }
-        links.push({ source: contributor.login, target: repoNodeId, type: 'collaborates', weight: contributor.contributions / 10 || 1 });
+        links.push({
+          source: contributor.login,
+          target: repoNodeId,
+          type: 'collaborates',
+          weight: contributor.contributions / 10 || 1,
+        });
       }
     }
 
@@ -231,7 +262,10 @@ export class SocialGraphAnalyzer {
   private generateRecommendations(
     mainUser: GitHubUser,
     following: Array<{ login: string }>,
-    repoData: { contributors: Map<string, Array<{ login: string; contributions: number }>>; stargazers: Map<string, string[]> }
+    repoData: {
+      contributors: Map<string, Array<{ login: string; contributions: number }>>;
+      stargazers: Map<string, string[]>;
+    }
   ): DeveloperRecommendation[] {
     const followingSet = new Set(following.map((f) => f.login));
     const scoreMap = new Map<string, { score: number; reasons: string[] }>();
@@ -262,7 +296,10 @@ export class SocialGraphAnalyzer {
 
   private generateInsights(
     repos: GitHubRepository[],
-    repoData: { contributors: Map<string, Array<{ login: string; contributions: number }>>; stargazers: Map<string, string[]> }
+    repoData: {
+      contributors: Map<string, Array<{ login: string; contributions: number }>>;
+      stargazers: Map<string, string[]>;
+    }
   ): AnalysisResult['insights'] {
     const collaboratorMap = new Map<string, number>();
     for (const contributors of repoData.contributors.values()) {
@@ -275,7 +312,11 @@ export class SocialGraphAnalyzer {
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5)
       .map(([login, collaborations]) => ({
-        user: { login, avatar_url: `https://avatars.githubusercontent.com/${login}`, html_url: `https://github.com/${login}` } as GitHubUser,
+        user: {
+          login,
+          avatar_url: `https://avatars.githubusercontent.com/${login}`,
+          html_url: `https://github.com/${login}`,
+        } as GitHubUser,
         collaborations,
       }));
 

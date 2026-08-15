@@ -1,9 +1,4 @@
-import {
-  GitHubUser,
-  GitHubRepository,
-  GitHubContributor,
-  GitHubFollower,
-} from './types';
+import { GitHubUser, GitHubRepository, GitHubContributor, GitHubFollower } from './types';
 
 const GITHUB_API_BASE = 'https://api.github.com';
 
@@ -61,9 +56,7 @@ export class GitHubAPIService {
       this.lastRateLimit = rateLimit;
 
       // 读取响应体（可能为 JSON 或为空）
-      const body = await response
-        .json()
-        .catch(() => ({})) as { message?: string };
+      const body = (await response.json().catch(() => ({}))) as { message?: string };
 
       if (response.ok) {
         return body as T;
@@ -131,9 +124,7 @@ export class GitHubAPIService {
     return {
       limit: parseInt(response.headers.get('X-RateLimit-Limit') || '0'),
       remaining: parseInt(response.headers.get('X-RateLimit-Remaining') || '0'),
-      reset: new Date(
-        parseInt(response.headers.get('X-RateLimit-Reset') || '0') * 1000
-      ),
+      reset: new Date(parseInt(response.headers.get('X-RateLimit-Reset') || '0') * 1000),
     };
   }
 
@@ -177,7 +168,12 @@ export class GitHubAPIService {
     );
   }
 
-  async getContributors(owner: string, repo: string, page = 1, perPage = 100): Promise<GitHubContributor[]> {
+  async getContributors(
+    owner: string,
+    repo: string,
+    page = 1,
+    perPage = 100
+  ): Promise<GitHubContributor[]> {
     return this.fetch<GitHubContributor[]>(
       `/repos/${owner}/${repo}/contributors?page=${page}&per_page=${perPage}`
     );

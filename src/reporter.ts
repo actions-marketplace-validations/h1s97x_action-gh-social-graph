@@ -80,7 +80,9 @@ export function generateMarkdownReport(username: string, result: AnalysisResult)
     const { remaining, limit, reset } = result.rateLimit;
     const pct = Math.round((remaining / limit) * 100);
     lines.push('');
-    lines.push(`> ⏳ GitHub API rate limit: **${remaining}/${limit}** remaining (${pct}%), resets at ${reset.toISOString()}`);
+    lines.push(
+      `> ⏳ GitHub API rate limit: **${remaining}/${limit}** remaining (${pct}%), resets at ${reset.toISOString()}`
+    );
   }
 
   return lines.join('\n');
