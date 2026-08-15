@@ -1,5 +1,9 @@
 # CNB 流水线配置
 # 参考 h1s97x/sduthesis 的流水线设计进行优化：
+#   0. 双向同步总览（重点）：
+#      - CNB → GitHub：本流水线 push 到 main 时自动同步（见下方第 1 条）
+#      - GitHub → CNB：由 .github/workflows/sync-cnb.yml 兜底反向同步（直接改 GitHub 再回灌 CNB），
+#        与下方构成双向闭环，排除 .cnb*/.github/ 避免同步环死循环。
 #   1. Git Sync：每次 push 到 main 后，使用官方 tencentcom/git-sync 插件自动同步到 GitHub
 #      （h1s97x/action-gh-social-graph），sync_mode: rebase（Rebase 模式），
 #      保留 GitHub 仓库特有平台文件（如 .github/workflows/*.yml），避免无条件 force 覆盖远端提交。
