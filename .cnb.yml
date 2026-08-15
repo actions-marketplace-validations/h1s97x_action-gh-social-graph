@@ -1,12 +1,56 @@
-# CNB 流水线：自动同步到 GitHub 仓库
+# CNB 流水线：与 GitHub 仓库双向同步
 #
 # 触发方式：
-#   - push：本仓库（CNB）main 分支每次提交/推送时，自动同步到 GitHub 同名仓库
-#   - web_trigger：可在 CNB 平台页面手动点击触发一次同步（挂在 $ 兜底分支下）
+#   - main.push：本仓库（CNB）main 分支每次提交/推送时，自动同步（推送）到 GitHub 同名仓库
+#   - $ web_trigger：可在 CNB 平台页面手动点击，从 GitHub 拉取最新提交到 CNB 仓库（挂在 $ 兜底分支下）
 #
 # 前置条件：
-#   密钥仓库 h1s97x/secret-env 的 main 分支下 env.yml 提供 GitHub 推送凭据 GITHUB_TOKEN，
-#   用于推送到 GitHub 仓库（见下方 imports 配置）。
+#   - 推送方向：密钥仓库 h1s97x/secret-env 的 main 分支下 env.yml 提供 GitHub 推送凭据 GITHUB_TOKEN，
+#     用于推送到 GitHub 仓库（见下方 imports 配置）。
+#   - 拉取方向：GitHub 源仓库为公开仓库，无需额外 Token 即可拉取。
+
+# 拉取 GitHub 最新提交到 CNB 仓库的公共流水线配置（通过 YAML 锚点复用）
+.sync-github-pull: &sync-github-pull
+  runner:
+    cpus: 2
+  docker:
+    image: node:20
+  stages:
+    - name: pull
+      script: |
+        set -e
+        echo "=== 配置 git 身份 ==="
+        git config user.name "cnb"
+        git config user.email "cnb@cnb.cool"
+
+        echo "=== 添加 GitHub 源远程（公开仓库，只读拉取）==="
+        git remote add gh-source "https://github.com/h1s97x/action-gh-social-graph.git" 2>/dev/null || \
+          git remote set-url gh-source "https://github.com/h1s97x/action-gh-social-graph.git"
+
+        echo "=== 拉取 GitHub main 分支 ==="
+        git fetch gh-source main
+
+        echo "=== 拉取 CNB origin main 分支（作为 --force-with-lease 参考 & 覆盖前对比）==="
+        git fetch origin main
+
+        echo "=== 检查 CNB 本地是否有尚未同步到 GitHub 的提交 ==="
+        local_only=$(git rev-list --count origin/main ^gh-source/main 2>/dev/null || echo 0)
+        if [ "$local_only" -gt 0 ]; then
+          echo "⚠️  警告：CNB main 存在 ${local_only} 个尚未同步到 GitHub 的提交，将被 GitHub main 覆盖。"
+          echo "  如果确认这些提交无需保留，请继续；否则请先手动处理后再触发拉取。"
+        fi
+
+        echo "=== 以 GitHub 为源对齐 CNB main 分支 ==="
+        git checkout -B main gh-source/main
+
+        echo "=== 推送到 CNB origin main 分支（--force-with-lease 防止误覆盖远端他人提交）==="
+        git push origin main --force-with-lease
+
+        echo "=== 拉取同步完成 ==="
+  endStages:
+    - name: cleanup
+      script: |
+        git remote remove gh-source 2>/dev/null || true
 
 # 同步到 GitHub 的公共流水线配置（通过 YAML 锚点复用）
 .sync-github: &sync-github
@@ -62,5 +106,5 @@ main:
 
 $:
   web_trigger:
-    - name: sync-to-github-manual
-      <<: *sync-github
+    - name: pull-from-github-manual
+      <<: *sync-github-pull
