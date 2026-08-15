@@ -1,0 +1,49 @@
+# CNB 流水线：自动同步到 GitHub 仓库
+#
+# 触发方式：
+#   - push：本仓库（CNB）main 分支每次提交/推送时，自动同步到 GitHub 同名仓库
+#   - web_trigger：可在 CNB 平台页面手动点击触发一次同步（挂在 $ 兜底分支下）
+#
+# 前置条件：
+#   密钥仓库 h1s97x/secret-env 的 main 分支下 env.yml 提供 GitHub 推送凭据 GITHUB_TOKEN，
+#   用于推送到 GitHub 仓库（见下方 imports 配置）。
+
+# 同步到 GitHub 的公共流水线配置（通过 YAML 锚点复用）
+.sync-github: &sync-github
+  runner:
+    cpus: 2
+  docker:
+    image: node:20
+  imports:
+    # 从密钥仓库注入 GitHub 推送凭据（需含 GITHUB_TOKEN）
+    - https://cnb.cool/h1s97x/secret-env/-/blob/main/env.yml
+  stages:
+    - name: sync
+      script: |
+        set -e
+        echo "=== 配置 git 身份 ==="
+        git config user.name "cnb"
+        git config user.email "cnb@cnb.cool"
+
+        echo "=== 添加 GitHub 远程 ==="
+        git remote add gh-target "https://x-access-token:${GITHUB_TOKEN}@github.com/h1s97x/action-gh-social-graph.git" 2>/dev/null || \
+          git remote set-url gh-target "https://x-access-token:${GITHUB_TOKEN}@github.com/h1s97x/action-gh-social-graph.git"
+
+        echo "=== 推送到 GitHub main 分支 ==="
+        git push gh-target "HEAD:main"
+
+        echo "=== 同步完成 ==="
+  endStages:
+    - name: cleanup
+      script: |
+        git remote remove gh-target 2>/dev/null || true
+
+main:
+  push:
+    - name: sync-to-github
+      <<: *sync-github
+
+$:
+  web_trigger:
+    - name: sync-to-github-manual
+      <<: *sync-github
