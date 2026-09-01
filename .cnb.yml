@@ -1,0 +1,119 @@
+# CNB 流水线配置
+# 参考 h1s97x/sduthesis 的流水线设计进行优化：
+#   0. 双向同步总览（重点）：
+#      - CNB → GitHub：本流水线 push 到 main 时自动同步（见下方第 1 条）
+#      - GitHub → CNB：由 .github/workflows/sync-cnb.yml 兜底反向同步（直接改 GitHub 再回灌 CNB），
+#        与下方构成双向闭环，排除 .cnb*/.github/ 避免同步环死循环。
+#   1. Git Sync：每次 push 到 main 后，使用官方 tencentcom/git-sync 插件自动同步到 GitHub
+#      （h1s97x/action-gh-social-graph），sync_mode: rebase（Rebase 模式），
+#      保留 GitHub 仓库特有平台文件（如 .github/workflows/*.yml），避免无条件 force 覆盖远端提交。
+#      敏感信息（GITHUB_USERNAME / GITHUB_TOKEN）存放在密钥仓库 secret-env，通过 imports 引用。
+#   2. 手动触发（Web Trigger）：从 GitHub 拉取最新提交到 CNB（GitHub → CNB），
+#      使用 git-sync 插件 sync_mode: pull，按钮见 .cnb/web_trigger.yml。
+#   3. Issue / PR 自动分配处理人 / 审查人：创建后自动将处理人、审查人设置为仓库维护者。
+#   4. Tag 发布：v* tag 触发时构建 dist 产物并创建 Release + 上传附件。
+#   5. PR 门禁：typecheck + test + lint。
+
+# PR 门禁公共配置（typecheck + test + lint）
+.pr-gate: &pr-gate
+  docker:
+    image: node:20
+  stages:
+    - name: install
+      script: npm ci
+    - name: typecheck
+      script: npm run typecheck
+    - name: test
+      script: npm run test
+    - name: lint
+      script: npm run lint
+
+main:
+  # push 到 main 后自动同步到 GitHub
+  push:
+    - name: sync-to-github
+      imports:
+        - https://cnb.cool/h1s97x/secret-env/-/blob/main/env.yml
+      stages:
+        - name: sync to github
+          image: tencentcom/git-sync
+          settings:
+            target_url: https://github.com/h1s97x/action-gh-social-graph.git
+            auth_type: https
+            username: ${GITHUB_USERNAME}
+            password: ${GITHUB_TOKEN}
+            branch: main
+            push_tags: true
+            # Rebase 模式：保留 GitHub 仓库特有平台文件，同时避免无条件 force 覆盖远端新提交。
+            sync_mode: rebase
+
+  # PR 创建后自动分配处理人和审查人 + PR 门禁
+  pull_request.target:
+    - name: auto-assign-pr-owner
+      env:
+        PR_REVIEWER: h1s97x
+      stages:
+        - name: assign pr to owner
+          type: git:reviewer
+          options:
+            type: add-assignee
+            reviewers: ${PR_REVIEWER}
+        - name: add pr reviewer
+          type: git:reviewer
+          options:
+            type: add-reviewer-from-repo-members
+    - name: pr-gate
+      <<: *pr-gate
+
+# 兜底分支：web_trigger / issue.* / tag_push 等事件
+$:
+  # 手动触发：从 GitHub 拉取（GitHub → CNB）
+  # 使用官方 tencentcom/git-sync 插件 + sync_mode: pull，按钮见 .cnb/web_trigger.yml
+  web_trigger_pull_from_github:
+    - name: web-trigger-pull-from-github
+      imports:
+        - https://cnb.cool/h1s97x/secret-env/-/blob/main/env.yml
+      stages:
+        - name: pull from github
+          image: tencentcom/git-sync
+          settings:
+            target_url: https://github.com/h1s97x/action-gh-social-graph.git
+            auth_type: https
+            username: ${GITHUB_USERNAME}
+            password: ${GITHUB_TOKEN}
+            sync_mode: pull
+
+  # Issue 创建后自动分配处理人
+  # 使用 cnbcool/cnb-cli 插件（CNB OpenAPI 命令行工具），流水线自动注入 CNB_TOKEN
+  issue.open:
+    - name: auto-assign-issue-owner
+      env:
+        ISSUE_ASSIGNEE: h1s97x
+      stages:
+        - name: assign issue to owner
+          image: cnbcool/cnb-cli
+          script: |
+            set -e
+            cnb issues add-assignees --assignees $ISSUE_ASSIGNEE
+
+  # Tag 发布：构建 dist 产物 + 创建 Release + 上传附件（v* tag 触发）
+  tag_push:
+    - name: release-action
+      docker:
+        image: node:20
+      stages:
+        - name: install
+          script: npm ci
+        - name: build dist
+          script: npm run build
+        - name: create release
+          type: git:release
+          options:
+            descriptionFromFile: CHANGELOG.md
+        - name: upload release assets
+          image: cnbcool/attachments:latest
+          settings:
+            attachments:
+              - "./dist"
+              - "./LICENSE"
+              - "./README.md"

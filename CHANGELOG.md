@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] - 2026-08-15
+
+### Added / 新增
+
+- Vitest 单元测试覆盖互相关注识别、图构建统计、推荐打分排序与 `generateMarkdownReport` 输出 / Unit tests for mutual-follow detection, graph stats, recommendation scoring, and `generateMarkdownReport`
+- ESLint + Prettier 代码规范配置，新增 `lint` / `format` 脚本 / ESLint + Prettier config with `lint` / `format` scripts
+- `build.yml` 增加 PR 触发，并以 typecheck + test + lint 作为 PR 门禁 / Added PR trigger and typecheck/test/lint gate jobs to `build.yml`
+- CNB 流水线增加 PR 门禁 pipeline（typecheck + test + lint）/ Added CNB PR gate pipeline (typecheck + test + lint)
+
 ## [1.0.0] - 2026-03-19
 
 ### Added / 新增

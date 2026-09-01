@@ -102,4 +102,9 @@ export interface AnalysisResult {
     topStarredRepos: Array<{ repo: GitHubRepository; stargazers: number }>;
     languageDistribution: Record<string, number>;
   };
+  rateLimit?: {
+    limit: number;
+    remaining: number;
+    reset: Date;
+  };
 }

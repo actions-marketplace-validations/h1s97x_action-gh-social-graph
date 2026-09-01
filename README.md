@@ -138,6 +138,53 @@ When triggered on a pull request, the action posts a comment like this:
 
 ---
 
+## Architecture & Data Flow / 架构与数据流
+
+This action follows a clean **three-stage pipeline**: API fetch → analyze → report.
+
+本 Action 采用清晰的**三阶段流水线**：数据获取（API）→ 分析（Analyzer）→ 报告（Reporter）。
+
+```
+ ┌────────────┐     ┌───────────────┐     ┌───────────────┐
+ │   api.ts   │ ──▶ │  analyzer.ts  │ ──▶ │  reporter.ts  │
+ │  (GitHub    │     │  (社交图谱分析) │     │ (Markdown 报告) │
+ │   API 客户端) │     │               │     │               │
+ └────────────┘     └───────────────┘     └───────────────┘
+      │                    │                    │
+  限流重试、            图谱构建、            报告生成、
+  并发批处理            推荐与洞察            输出与发布
+```
+
+### Stage 1 — API Client (`src/lib/github/api.ts`) / 数据获取
+
+- Wraps the GitHub REST API with typed methods (`getUser`, `getAllFollowers`, `getAllFollowing`, `getAllRepositories`) / 封装 GitHub REST API，提供类型化方法
+- Implements **rate-limit aware retry** (429/5xx) and **concurrent batch fetching** to stay within limits / 实现**限流感知重试**与**并发批处理**，避免超出速率限制
+- Exposes rate-limit info for monitoring / 暴露限流信息用于监控
+
+### Stage 2 — Analyzer (`src/lib/github/analyzer.ts`) / 分析
+
+- Builds a social graph (nodes & links) from users, followers, following and repositories / 由用户、关注者、关注及仓库构建社交图谱（节点与连接）
+- Detects **mutual followers**, **top collaborators**, and **language distribution** / 识别互相关注、顶级协作者及语言分布
+- Generates **developer recommendations** based on collaboration patterns / 基于协作模式生成开发者推荐
+
+### Stage 3 — Reporter (`src/reporter.ts`) / 报告
+
+- Turns the analysis result into a bilingual **Markdown report** / 将分析结果转换为中英双语 **Markdown 报告**
+- Sets action **outputs** and writes a **Job Summary** / 设置 Action 输出并写入 Job Summary
+- Posts the report as a **PR comment** (auto-updates on re-run) / 将报告发布为 **PR 评论**（重新运行时自动更新）
+
+### Orchestration / 编排
+
+- `src/index.ts` reads inputs, invokes the pipeline, and handles PR comment / summary delivery / `src/index.ts` 读取输入、调用流水线，并负责 PR 评论与摘要的发布
+- Each stage is decoupled so components can be tested and extended independently / 各阶段解耦，便于独立测试与扩展
+
+```yaml
+# Data flow overview / 数据流总览
+GitHub API ──▶ api.ts ──▶ analyzer.ts ──▶ reporter.ts ──▶ PR comment / Job Summary
+```
+
+---
+
 ## Rate Limits / 速率限制
 
 The default `GITHUB_TOKEN` allows **5,000 API requests/hour**. For large networks, consider using a Personal Access Token with higher limits.
